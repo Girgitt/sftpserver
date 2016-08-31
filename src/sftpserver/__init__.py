@@ -34,8 +34,31 @@ import paramiko
 
 from sftpserver.stub_sftp import StubServer, StubSFTPServer
 
+import threading
+
 HOST, PORT = 'localhost', 3373
 BACKLOG = 10
+
+
+class ConnHandlerThd(threading.Thread):
+    def __init__(self, conn, keyfile):
+        threading.Thread.__init__(self)
+        self._conn = conn
+        self._keyfile = keyfile
+
+    def run(self):
+        host_key = paramiko.RSAKey.from_private_key_file(self._keyfile)
+        transport = paramiko.Transport(self._conn)
+        transport.add_server_key(host_key)
+        transport.set_subsystem_handler(
+            'sftp', paramiko.SFTPServer, StubSFTPServer)
+
+        server = StubServer()
+        transport.start_server(server=server)
+
+        channel = transport.accept()
+        while transport.is_active():
+            time.sleep(1)
 
 
 def start_server(host, port, keyfile, level):
@@ -50,18 +73,9 @@ def start_server(host, port, keyfile, level):
     while True:
         conn, addr = server_socket.accept()
 
-        host_key = paramiko.RSAKey.from_private_key_file(keyfile)
-        transport = paramiko.Transport(conn)
-        transport.add_server_key(host_key)
-        transport.set_subsystem_handler(
-            'sftp', paramiko.SFTPServer, StubSFTPServer)
-
-        server = StubServer()
-        transport.start_server(server=server)
-
-        channel = transport.accept()
-        while transport.is_active():
-            time.sleep(1)
+        srv_thd = ConnHandlerThd(conn, keyfile)
+        srv_thd.setDaemon(True)
+        srv_thd.start()
 
 
 def main():
@@ -93,7 +107,6 @@ def main():
         sys.exit(-1)
 
     start_server(options.host, options.port, options.keyfile, options.level)
-
 
 if __name__ == '__main__':
     main()
